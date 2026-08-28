@@ -6,7 +6,7 @@ expensive knowledge to reacquire.
 
 | File | Covers | Status |
 |---|---|---|
-| `what-worked.md` | choices that held up under months of running | not yet written |
+| `what-worked.md` | choices that held up under months of running, each with its cost | **written** |
 | `what-did-not.md` | failures and dead ends, with the reasoning and what to do instead | **written** — read it before you debug anything |
 | `incidents/` | individual failures, with the evidence captured at the time | not yet written |
 | `measurements.md` | real numbers, each with the method used to get it | not yet written |
