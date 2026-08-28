@@ -129,19 +129,33 @@ oversized request is taken from something else on a machine that did not have it
 is sometimes "not on this machine." That is more useful than a configuration that technically
 starts and then thrashes.
 
-**Do not paste the human's real values back into this repo.** If you are contributing changes
-upstream, they go in as placeholders. CI enforces this
-(`scripts/check-anonymized.sh`) — run it before you push.
+**Keep the human's real values in the human's own repo.** As you work you will resolve the
+placeholders into real hostnames, addresses, and credentials. That is the job — and those
+values belong in *their* infrastructure repo, or in their own copy of this one. Keep track of
+where you have written them down; §5 matters the moment any of it becomes public.
 
 ---
 
-## 5. If you are adapting this repo, not following it
+## 5. If the human publishes their version of this
 
-Contributions welcome, with one hard rule: **write generic on the first pass.** Do not write a
-document about your machines and sanitize it afterwards — the result reads as a redacted
-private document, because the sentences are still shaped around specific hardware. Write it
-about `<NODE_A>` from the start.
+Most people will fork or copy this repo, fill the placeholders in with their own machines, and
+keep it private. That is the expected use and nothing below applies to it — real values in a
+private repo are just configuration.
 
-Run `scripts/check-anonymized.sh` before pushing. If you are adapting docs from a real cluster,
-create a `.anonymize-denylist.local` (gitignored) holding your own hostnames, domains,
-usernames, and passwords so the guard can catch them too.
+**It applies the moment any of that becomes public**, which is a decision people usually make
+after the writing is already done. Two things to hand them then:
+
+**`scripts/check-anonymized.sh` is theirs to use, not just ours.** The generic half — private
+IPs, emails, key material, internal hostnames — works out of the box. The other half is a
+`.anonymize-denylist.local` (gitignored) holding their own hostnames, domains, usernames, and
+passwords, so the guard catches what only they know is sensitive. The list is gitignored
+because a committed list of real values would itself be the leak. Wire it into CI or a
+pre-push hook; a check that depends on remembering to run it does not hold.
+
+**Write generic on the first pass** if publishing is even a possibility. Sanitizing afterwards
+produces a document that reads as redacted, because the sentences are still shaped around
+specific hardware — `<NODE_A>` from the start costs nothing and cannot be undone wrong.
+
+**Changes sent back here** are welcome and follow the same rule: placeholders only, guard
+green. But that is the rare case, and it is not what this file is for — this file is for
+building the human's cluster.
