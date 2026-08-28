@@ -1,0 +1,96 @@
+# catalog.yaml.example — the whole definition of every deployable service.
+#
+# Three fictional services, chosen to show the three levels of complexity you
+# will actually meet. Everything here is made up; none of these images exist.
+#
+# The engine reads this file live from git on each deploy. Adding a service is
+# adding an entry here — no rebuild, no restart, no other file touched.
+#
+# See README.md section 4 for the field-by-field rules, and section 3 for why
+# `name` is the only identifier a service needs.
+
+services:
+
+  # ── Level 1: the common case. Five lines and it is deployed. ──────────────
+  #
+  # Everything else is resolved from the platform: one storage class, one
+  # certificate issuer, one ingress, wildcard DNS. Nothing here says "which".
+  - name: notepad
+    description: "Shared scratch notes"
+    image: ghcr.io/example-org/notepad:2.4.1
+    port: 8080
+    template: stateful
+
+  # ── Level 2: overrides. Each one exists because a real service needed it. ─
+  #
+  # Remember the two rules: an override REPLACES (it never merges), and it
+  # applies to the MAIN workload only — the one named after the service.
+  - name: photos
+    description: "Photo library"
+    image: ghcr.io/example-org/photos:1.12.0
+    port: 3000
+    template: stateful-postgres
+    storageSize: "50Gi"
+    dataMount: /library          # this image does not use /data
+    resourceOverrides:
+      requests: {cpu: "200m", memory: "512Mi"}
+      limits:   {cpu: "2",    memory: "2Gi"}
+    env:
+      - name: THUMBNAIL_WORKERS
+        value: "2"
+      - name: PUBLIC_URL
+        value: "https://photos.<CLUSTER_DOMAIN>"
+    securityContext:
+      runAsUser: 1000
+      fsGroup: 1000
+    # Injects env vars from a Secret named <name>-secret in the namespace.
+    # The Secret itself is created the way 05-gitops section 4 describes —
+    # encrypted in the repo. The engine never sees the value.
+    secretEnv:
+      DB_PASSWORD: <KEY_IN_THE_SECRET>
+
+  # ── Level 3: this one needed its own template. ────────────────────────────
+  #
+  # A workload with a component layout no generic shape covers. That is a
+  # template file with as many objects as it likes, using the same tokens —
+  # NOT a tenth override field. A template is inspectable; an override chain
+  # is not. See README.md section 4.
+  #
+  # Note `nodeClass: heavy`: a hint the engine turns into a node selector for
+  # machines labelled as capable. It is a CLASS, not a hostname — pinning a
+  # service to a named machine is what 03-storage section 8 warns about.
+  - name: search
+    description: "Full-text search over everything"
+    image: ghcr.io/example-org/search:9.2
+    port: 8983
+    template: search           # a bespoke template, not one of the six shapes
+    nodeClass: heavy
+    storageSize: "100Gi"
+    wave: 30                   # after the platform, before things that query it
+
+# ── Fields the engine requires ───────────────────────────────────────────────
+#
+#   name          unique; becomes namespace, hostname, and every object name
+#   description   one line; ends up in the lifecycle record and any dashboard
+#   image         rewrite through your registry's pull-through cache — 04 s4
+#   port          container HTTP port
+#   template      which shape from 06 section 2
+#
+# ── Optional, all applying to the main workload only ─────────────────────────
+#
+#   storageSize        size of the service's volume
+#   dataMount          where that volume is mounted
+#   resourceOverrides  replaces the template's requests/limits entirely
+#   env                replaces matching template env entries — never appends
+#   secretEnv          env var -> key in the <name>-secret Secret
+#   securityContext    runAsUser / fsGroup for images that need a fixed uid
+#   nodeSelector       a LABEL, not a hostname
+#   nodeClass          a capability class the engine maps to a selector
+#   volumes            extra volumes
+#   volumeMounts       extra mounts on the main container
+#   initContainers     appended; the one field where appending is correct
+#   configMap          extra ConfigMaps created in the namespace
+#   wave               ordering hint for the GitOps controller — 05 section 3
+#
+# If you find yourself wanting a field that is not here, the answer is usually
+# a template, not a field.
