@@ -1,0 +1,45 @@
+# /etc/rancher/k3s/registries.yaml
+#
+# Copy to EVERY node, then restart k3s on that node:
+#   sudo systemctl restart k3s          # control plane
+#   sudo systemctl restart k3s-agent    # workers
+#
+# Without this file, any pod pulling an image from your own registry sits in
+# ImagePullBackOff. The k3s installer does not write it, and neither does the
+# node onboarding script in 01-nodes/ — add it there.
+#
+# The ca_file is the certificate installed by 02-network/install-ca-trust.sh.
+# This file is useless without that step, and that step is incomplete without
+# this file.
+
+mirrors:
+  # Your own registry.
+  <REGISTRY_HOST>:
+    endpoint:
+      - "https://<REGISTRY_HOST>"
+
+  # Optional but recommended: route public images through the registry's
+  # pull-through cache, so each public image is fetched once per LAN rather
+  # than once per node, and public rate limits stop being your problem.
+  #
+  # The project path on the right ("dockerhub-proxy" here) must match a
+  # proxy-cache project you have created in the registry.
+  docker.io:
+    endpoint:
+      - "https://<REGISTRY_HOST>/v2/dockerhub-proxy"
+
+configs:
+  <REGISTRY_HOST>:
+    tls:
+      # Not "insecure_skip_verify: true". You built a CA in 02-network/
+      # precisely so this line could exist.
+      ca_file: "/usr/local/share/ca-certificates/<CA_FILE>"
+
+    # Only if your registry requires authentication to PULL. A registry whose
+    # public project allows anonymous pulls needs no credentials here — and a
+    # credential in a file on every node is a credential in more places than
+    # you can rotate. Prefer anonymous pulls for the images your own cluster runs.
+    #
+    # auth:
+    #   username: <REGISTRY_PULL_USER>
+    #   password: <REGISTRY_PULL_TOKEN>

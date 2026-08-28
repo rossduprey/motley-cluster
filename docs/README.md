@@ -9,7 +9,7 @@ Read in order. Each layer assumes the one above it is working and verified; see
 | `01-nodes/` | OS, k3s install, joining machines, node configuration | **written** — includes `prepare-node.sh` |
 | `02-network/` | DNS, ingress, internal certificate authority, TLS | **written** — includes `install-ca-trust.sh` |
 | `03-storage/` | replicated block storage on consumer disks, backups | **written** |
-| `04-git-ci-registry/` | git, CI runners, and a container registry in-cluster | not yet written |
+| `04-git-ci-registry/` | git, CI runners, and a container registry in-cluster | **written** — includes `registries.yaml.example` |
 | `05-gitops/` | continuous reconciliation from a repo; encrypted secrets | not yet written |
 | `06-deploying-services/` | generic manifest templates; deploying your own workloads | not yet written |
 | `07-observability/` | metrics, dashboards, log aggregation | not yet written |
