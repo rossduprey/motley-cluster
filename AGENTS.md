@@ -53,6 +53,11 @@ Read in this order. Each layer assumes the one above it is working and **verifie
 11. `findings/` — **read `what-did-not.md` before you debug anything.** Several failures here
     look like your mistake and are not.
 
+`docs/08-the-deploy-engine/` sits **after** all of that, and it is optional. It turns deploying a
+service into naming one. Do not read it as part of the install path and do not build it early —
+it is a component the human then owns, and it is worth owning only once the platform beneath it
+is boring.
+
 **Do not skip ahead.** Storage before networking, or GitOps before a registry, produces
 failures whose cause is three layers up. If the human wants to jump, say what breaks and let
 them decide.
@@ -104,6 +109,7 @@ carrying a broken layer forward is how a weekend becomes a month.
 | **GitOps** | a change committed to the repo reaches the cluster with nobody running a command; a hand-made change is reverted automatically |
 | **Deploying services** | the human deploys a service *you did not write for them* using only the templates |
 | **Observability** | you can answer "is it slow, and where" with a graph rather than a guess |
+| **Deploy engine** *(optional)* | a service deploys from a catalog entry alone, and deleting it and redeploying it produces something identical |
 
 ---
 

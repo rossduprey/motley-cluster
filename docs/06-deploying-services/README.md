@@ -87,6 +87,11 @@ That was the right shape and the wrong amount of code: **it is a component you n
 upgrade and debug.** Start with option 1 or 3. Build the engine only if you have felt the specific
 pain that justifies it.
 
+**If you do reach that point, it is written up.** `08-the-deploy-engine/` is the design, the
+catalog schema, and a working implementation — along with the six ways ours broke. It is
+deliberately the last section in the repo: it is worth building after the platform is boring, not
+instead of making it boring.
+
 **The idea worth stealing regardless of mechanism:** the *definition* of a service is data in a
 file — image, port, shape, size, ordering — that a human, a script, and later an AI agent can all
 read the same way. That is what makes "add a service" a five-line change instead of an exercise in
