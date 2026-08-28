@@ -1,0 +1,436 @@
+# What did not work
+
+Every entry below is something that actually happened on the example cluster. They are written
+here because each one cost real time, and most of them **look like a different problem than they
+are** — which is the expensive part.
+
+**Read this before you debug anything.** Several of these present as a broken application when
+the cause is three layers down, and you will otherwise spend a day inside the wrong component.
+
+Format for each: *what we did* → *what happened* → *why* → *what to do instead*. Where a failure
+was silent, that is stated explicitly, because a silent failure is a different class of problem
+from a loud one.
+
+---
+
+## Storage
+
+### A backup job with no volumes enrolled looks exactly like a working backup job
+
+**What we did.** Configured daily and weekly recurring backup jobs against a remote target,
+confirmed the target was reachable, and moved on.
+
+**What happened.** The jobs ran on schedule for **74 days and backed up nothing.** Volumes must
+be *enrolled* in a recurring job individually; creating the job does not enrol anything. Nobody
+noticed, because a job that backs up zero volumes succeeds. It was discovered during a real data
+loss, which is the worst possible time to discover it.
+
+**Why it stayed invisible.** There was no alert on "backup job completed with zero volumes",
+and the dashboard showed green. The monitoring stack was **not scraping the storage layer at
+all**, so every storage alert rule that existed was dormant — configured, evaluated against no
+data, and therefore permanently silent.
+
+**Instead:**
+
+- Enrol a volume in the backup job **at deploy time**, in the same change that creates it. Not
+  in a cleanup pass.
+- Verify the metrics endpoint of the storage layer is actually being scraped. An alert rule with
+  no underlying metric is not a safety net, it is the *appearance* of one.
+- **Restore once, on purpose, before you need to.** A backup you have never restored is a
+  hypothesis.
+
+### The snapshot existed and was useless — retention shorter than time-to-detection
+
+**What happened.** A database's schema was wiped. The loss went unnoticed for **five days**,
+because the application kept answering and the pod stayed `Ready`. By the time anyone looked,
+the only snapshot available had been taken *after* the data was already gone. It restored
+cleanly and produced an empty database.
+
+**Why.** Retention was seven days, which sounds generous until you subtract five days of
+undetected loss. And a snapshot taken after the damage is a faithful copy of the damage.
+
+**Instead:** size retention against **how long a problem can plausibly go unnoticed**, not
+against how often you take snapshots. If nothing tells you within a day that a service is
+broken, a seven-day window is really a two-day window.
+
+### Detaching a volume through the storage UI, outside the CSI path
+
+**What we did.** Used the storage system's own web UI to detach a volume that Kubernetes was
+managing — it was right there, and it looked like the direct route.
+
+**What happened.** It left a stale iSCSI target registered on the node with no matching
+initiator. Every subsequent attach failed with *"this logical unit is still active"*, and the
+workload could not start at all. The fix was restarting the storage instance-manager pod on that
+node.
+
+**Why.** The CSI driver owns the attach/detach lifecycle. Reaching around it leaves the
+kernel-side state and the controller-side state disagreeing, and the controller has no way to
+know.
+
+**Instead:** never attach or detach a Kubernetes-managed volume by hand. Drive it through the
+workload — scale down, let CSI detach; scale up, let CSI attach. This came up **twice** in
+different incidents, the second time after it had already been written down.
+
+### A filesystem error flag silently blocks online resize forever
+
+**What we did.** Expanded a PVC that had filled up.
+
+**What happened.** The block device grew. The filesystem did not. The PVC sat in
+`FileSystemResizePending` and emitted **500+ resize-failure events**, and the error was
+`Permission denied` — which sends you looking at RBAC, mount options, and privilege, none of
+which were the problem.
+
+**Why.** The disk had filled, writes had failed, and that set the error flag in the ext4
+superblock. `resize2fs` deliberately refuses to resize a filesystem carrying that flag. `EPERM`
+is a badly chosen errno for "I am refusing on principle", and it cost the whole diagnosis.
+
+**Instead:** check the filesystem state (`tune2fs -l` → *"clean with errors"*) before believing
+a permissions story. Run `e2fsck -fy` on the unmounted device to clear the flag, then resize.
+`e2fsck` exit code 1 means "errors corrected" and is a **success** here.
+
+**And the structural fix:** a volume that fills up does not merely stop accepting writes, it can
+damage the filesystem badly enough to block the obvious remedy. Alert on volume *fullness*, not
+on volume failure.
+
+### Read-write-once volume plus a hard node pin equals "deployed, but no pod, and no error"
+
+**What happened.** A workload was pinned to a specific machine with `nodeSelector` and used an
+RWO volume. The volume was attached elsewhere — or detached and not reattaching — so the pod
+could never be scheduled. From the outside: the deployment existed, the app showed as deployed,
+and nothing at all happened. No disk activity, no network activity, no logs, for days.
+
+**Instead:** treat "deployed but zero pods and zero events" as a **volume attachment** question
+first. And avoid pinning a workload to one node unless something physical requires it — a node
+pin converts a recoverable scheduling problem into a hard stop.
+
+### Replicas quietly piled onto the wrong disk
+
+**What we did.** Added large external disks to some nodes intending them to hold bulk replica
+data, leaving the small internal system disks for the OS.
+
+**What happened.** One node's internal system disk was still marked schedulable and had
+accumulated **50 replicas**, while the large disk beside it held three. Nothing was broken;
+everything was in the wrong place, and the system disk was quietly filling.
+
+**Why.** Placement had no disk tags, no node tags, and no storage-class disk selector. The only
+lever actually in use was per-disk "allow scheduling". Default placement then does the sensible
+thing with the information it has, which was not the intent nobody had encoded.
+
+**Instead:** if a disk is not meant to hold data, **turn its scheduling off explicitly.** Intent
+that lives only in someone's head is not configuration. Then check where replicas actually
+landed rather than where you meant them to land.
+
+### Disk records outlive disks
+
+Two variants, both of which take capacity out of the pool without an obvious error:
+
+- **A phantom record with an empty path**, left over from a disk add/remove, permanently
+  `NotReady` with `failed to get fs stat for ""`. Harmless but permanently red, which trains you
+  to ignore red.
+- **A filesystem UUID mismatch** after a disk was reformatted or remounted — the storage layer
+  refuses the disk *to protect data*, reporting zero capacity while still showing a phantom
+  reservation. Correct behaviour, alarming presentation.
+
+**Instead:** removing a disk record often requires disabling scheduling on it **first** — the
+admission webhook rejected the removal until we did, with a 500 rather than a useful message.
+After a remove-and-re-add, confirm the disk returns `Ready` *and* `Schedulable` with a plausible
+capacity. If it comes back with the same mismatch, the problem is on the host — the mount, or
+the on-disk config file — and no amount of API work will fix it.
+
+---
+
+## DNS and networking
+
+### One node running a different network manager silently corrupted DNS for every pod on it
+
+This is the single best example in this repo of a failure that looks like something else
+entirely.
+
+**Symptom.** A registry component crash-looped — but *only when scheduled onto one particular
+machine*. Healthy everywhere else. Its liveness probe timed out; its logs showed it failing to
+reach its own cache service.
+
+**Actual cause, three layers down.** That one node ran NetworkManager; every other node ran
+dhcpcd. NetworkManager writes `search <domain>` into `/etc/resolv.conf`. dhcpcd writes
+`domain <domain>`. **kubelet propagates `search` entries into every pod's DNS config and ignores
+`domain` entries.** With Kubernetes' default `ndots:5`, a cluster-internal name like
+`service.namespace.svc.cluster.local` — four dots — gets the search domain appended and tried
+*first*. That expanded name matched the LAN's own wildcard DNS record and resolved to a
+completely unrelated machine. Every in-cluster service call from pods on that node went to the
+wrong host, and the absolute lookup was never attempted.
+
+**Instead:**
+
+- After adding any node, check `/etc/resolv.conf` and confirm it says `domain`, not `search`.
+  This is a one-line check that would have saved the entire investigation.
+- Standardise the network manager across nodes. A heterogeneous cluster is fine; a
+  heterogeneous *resolver configuration* is not.
+- A wildcard DNS rewrite for your internal domain is convenient and makes this failure mode much
+  worse — it turns a lookup miss into a confident wrong answer.
+
+**Related, same node, same session:** DHCP reservations by MAC silently did not apply, because
+dhcpcd defaults to `duid` identification and the router was matching on MAC. The node came up on
+a different address than the one reserved for it. Setting `clientid` in `dhcpcd.conf` fixed it.
+A node that changes address mid-cluster is its own afternoon.
+
+---
+
+## Certificates
+
+### Certificates expired because their challenge pods were stranded on a dead node
+
+**What happened.** A node was created out-of-band, ran for about eight hours, went `NotReady`,
+and was never deleted. ACME HTTP-01 challenge solver pods for two certificate renewals had been
+scheduled onto it while it was healthy. They stuck in `ContainerCreating` forever. Both
+certificates expired.
+
+**Why the pods were never rescheduled.** Solver pods are bare, short-lived pods — not owned by a
+controller that handles eviction. The node-lifecycle controller did not move them. Ten orphaned
+pods in total were still pinned to that dead node, including storage and monitoring daemons,
+all looking healthy in the API and none of them running.
+
+**And then it got worse on its own.** cert-manager records `lastFailureTime` and backs off
+roughly two hours per failure. Cleaning up the dead node was not enough; the backoff had to be
+cleared explicitly by patching the certificate's status subresource, or issuance would keep
+waiting.
+
+**Instead:**
+
+- **Delete dead nodes.** A `NotReady` node that is merely left alone keeps holding pod
+  references that appear fine in the API and are running nowhere.
+- When cert-manager is stuck, look for `Backing off from issuance due to previously failed
+  issuance(s)` and clear `lastFailureTime` after fixing the underlying cause.
+- Alert on certificate *expiry approaching*, not on renewal failure. Renewal had been failing
+  quietly for days.
+
+**A syntax trap that cost time inside the cleanup:** deleting several resource types in one
+command using the space-separated form processes only the **first** type and exits successfully.
+Use the `type/name type/name` slash form. It fails silently, which is how it survives review.
+
+### Everything trusts the internal CA — except the things you forgot
+
+An internal certificate authority is the right answer for a LAN, and this repo recommends it.
+The recurring cost is that trust must be installed *everywhere something makes an outbound
+HTTPS call*, and the list is longer than it looks.
+
+**Concretely:** the vulnerability scanner's per-image scan jobs could not pull image metadata
+from the internal registry — `x509: certificate signed by unknown authority` — so scanning was
+broken for essentially every workload the cluster actually ran, while the scanner's own
+Application reported **Synced and Healthy** and its dashboard held plenty of reports for
+*public* images. It looked like it was working. It was working on the wrong half of the estate.
+
+**The dead end we went down:** reaching for "insecure registry" flags first. One of them turned
+out to map to a different setting than its name implied, and the one that *was* correct only
+affected a different component's own registry access, not the scan jobs' image fetches. Two
+rounds of that.
+
+**Instead:** inject the CA certificate properly — most charts have a values key for exactly this
+— rather than disabling verification. Skipping verification is not only worse, in this case it
+also **did not work**, which is the ideal outcome for a shortcut.
+
+---
+
+## Controllers and scheduling
+
+### A Deployment pinned to one node with a host port generated 106 dead pods
+
+**What we did.** Ran a DNS server as a `Deployment` with `strategy: Recreate`, `nodeName` set
+directly to one machine, and a `hostPort`.
+
+**What happened.** Something — never identified — nudged the controller into recreating the pod.
+The single healthy pod already held the host port, so the scheduler rejected every replacement:
+`didn't have free ports for the requested pod ports`. The controller tried again. And again.
+**106 `Failed` pods accumulated.** Service was never interrupted; the original pod served DNS
+throughout.
+
+**Why.** `Deployment` + `nodeName` produces a controller that will retry forever against a
+constraint it cannot satisfy, and `strategy: Recreate` makes it especially eager. Kubernetes
+does **not** garbage-collect pods in the `Failed` phase, so the tombstones simply pile up.
+
+**Instead:** for anything using a `hostPort` and pinned to a specific machine, use a
+**DaemonSet** with a `nodeSelector`. The DaemonSet controller understands one-pod-per-node and
+does not spam replacements when admission rejects one.
+
+**Worth internalising separately:** a namespace with 107 pods in it looked like an emergency and
+was not. Pod *count* is not health. Check phases before reacting.
+
+---
+
+## Health, and knowing whether anything actually works
+
+### `1/1 Ready` for five days while every request returned 503
+
+The forum incident above is really two failures, and this is the second one. The pod was
+running. Its liveness probe passed — the probe checked that a process was listening, which it
+was. The application behind it was answering every single request with an error, because its
+database was empty.
+
+**Nothing in the cluster noticed.** No alert fired. It was found by a person visiting the site.
+
+**Instead:** probe from the outside, on the path a user actually takes. A blackbox exporter
+hitting real service URLs and alerting after a few minutes of failure is a small amount of
+configuration and is the difference between five days and five minutes.
+
+**The known weakness of the fix we shipped:** the probe target list is static, so a service
+added later is not probed until someone remembers to add it. A monitoring system that requires
+you to remember is a monitoring system with a half-life. Generate the list from whatever your
+source of truth for running services is.
+
+### Green CI does not mean the new code is running
+
+A pipeline that builds and pushes an image successfully tells you the image exists. It says
+nothing about whether anything pulled it. Check the **running pod's image digest**, and compare
+it across two pods pulled at different times if it matters.
+
+### An advisory status field read as an authoritative one
+
+An in-house deploy tool tracked each job's progress in a background thread, polling until the
+job reached a terminal state. When the tool's own pod restarted, every in-flight thread died and
+the job records froze at whatever they last said. Jobs that had long since succeeded reported
+`committed` forever.
+
+Nothing was actually broken — the cluster was correct the whole time. But for a while we were
+debugging deploys based on a status display, which was the wrong source of truth.
+
+**Instead:** know which of your status surfaces are **derived** and which are **authoritative**.
+The cluster's own state is authoritative. Anything caching a view of it is advisory, and should
+say so on its face. If you write such a tool, reconcile in-flight records on startup.
+
+---
+
+## Working outside the rails
+
+Every incident in this section shares a root cause: someone applied something to the cluster
+directly instead of committing it to the repository the cluster reconciles from. Including us,
+knowing better, with the rule already written down.
+
+### One out-of-band `kubectl apply` cost two expired certificates
+
+The dead node that stranded the ACME solvers above got there by a direct apply — a nested test
+cluster, created out of band, that registered as a real node. It ran, it died, and the damage
+surfaced **three days later** in a component nobody would connect to it.
+
+**This is the shape to remember:** an off-rails change does not usually break the thing you
+touched. It breaks something else, later, in a way that gives no hint where to look.
+
+### Hand-applied workloads become permanently invisible
+
+A workload applied by hand is unknown to GitOps and to any deploy tooling you have. It will not
+be reconciled, will not be evicted, will not be cleaned up, and will not appear in inventories.
+One such workload sat crash-looping — **36 restarts in ten hours** — and its committed manifests
+had already drifted from what was actually running: the live pod was on a different machine than
+its own README claimed, and mounted a volume that had been hand-created and did not appear in
+the manifests at all.
+
+**If you must do a one-off**, write down at the same moment: that it exists, that it is off the
+rails, and how it gets cleaned up. Then put a date on converting it. A snowflake with no expiry
+date is permanent.
+
+### `Synced + Healthy` is not the same as "running"
+
+An app scaled to `replicas: 0` is a perfectly valid state, so GitOps reports it **Healthy** and
+green. Two services sat scaled to zero — reason unknown, most likely a manual edit in some
+earlier session — and the dashboard was entirely content about it.
+
+**Instead:** health dashboards answer "does the cluster match the repo". They do not answer "is
+anything running". Those need separate signals — which is the blackbox probing point again, from
+a different direction.
+
+### Anything that predates your tooling needs an explicit adoption step
+
+Services deployed before a deploy tool existed had no records in it. Its restore operation
+returned `404` for them, because there was nothing to restore *from* — a diagnostic that reads
+like "not found" and actually means "never known about". Adopting them meant creating the
+records the tool expected by hand, once, and then cycling each service through the tool to prove
+the path worked end to end.
+
+**Instead:** when you introduce tooling that owns a lifecycle, inventory what already exists and
+adopt it deliberately. And flag adopted records as adopted — you will want to tell them apart
+later.
+
+### An interrupted multi-step operation leaves a state nothing can describe
+
+An evict operation was supposed to write an archive, strip the manifest, then flip a registry
+flag. It got partway: the manifest carried an `# EVICTED` header, the registry said `evicted`,
+and the service was **running perfectly normally** because the strip step never happened. Every
+individual component was internally consistent and the overall picture was fiction.
+
+**Instead:** order multi-step state changes so the *recoverable* step comes first, and make the
+final flip the last thing that happens. If a step can fail, decide in advance whether the
+operation rolls back or is safe to re-run. And when reconciling a split state, trust the
+**cluster**, not the bookkeeping.
+
+### Two systems setting the same value produced a manifest that could never apply
+
+A workload template defined a block of environment variables as defaults. The per-instance
+configuration also set several of them. The override logic **appended** rather than merged, so
+the generated manifest contained duplicate `name` keys in the `env` array.
+
+The result: `duplicate entries for key [name=...]`, GitOps could not apply the Deployment at
+all, **no pod was ever created**, and from the outside it simply looked like a deploy that was
+taking a very long time to download something. Days were lost watching a graph that was never
+going to move.
+
+**Instead:** exactly one layer owns a given value. If templates carry defaults, the merge must
+deduplicate — and the failure must be loud. A deploy that produces no pod and no error is worse
+than a deploy that fails.
+
+### Running a second deploy engine "in parallel" to test it
+
+A duplicate deploy engine was stood up alongside the working one. It was eventually scaled to
+zero and retired without ever taking over. What it left behind was ambiguity — two systems that
+could each claim to own a service, shared-namespace drift that showed up as permanent
+`OutOfSync` noise, and a period where the answer to "which one deployed this" was "check both".
+
+**Instead:** migrate, don't duplicate. Two systems that both partially own the same thing cost
+more than either one does.
+
+---
+
+## Permissions
+
+### A missing RoleBinding was substituted into every service template as a text placeholder
+
+The deploy tool fetched the internal CA certificate from a secret and substituted it into each
+service's template. Its ServiceAccount had no RoleBinding granting access to that secret, so the
+API returned `403`. The fetch function returned an **empty string**, and the substitution wrote
+its fallback text instead.
+
+The result: **every service deployed by that tool** carried a 28-byte file where its CA
+certificate should be, containing the literal words *"CA cert not available"*. Nothing failed at
+deploy time. Nothing failed at startup. It failed only when a service tried to make an HTTPS
+call to another internal service — a slow-burning fault distributed across nine templates.
+
+**Instead:**
+
+- A function that fetches credentials or certificates must **fail loudly**, not return empty. A
+  fallback string that gets written to disk as though it were a certificate is worse than a
+  crash, because a crash is discovered immediately.
+- Verify RBAC by making the call, not by reading the manifest. And note that a `403` on a
+  *cross-namespace* secret read is easy to miss precisely because everything in the tool's own
+  namespace works fine.
+
+**A trap in verifying this specific kind of thing:** the API's `permissions` field on a resource
+describes what the *account you are asking as* can do, not what some other ServiceAccount can
+do. It is not evidence. A `403` from the actual endpoint is evidence.
+
+---
+
+## The pattern underneath most of these
+
+Reading them together, one shape recurs far more than any technical cause:
+
+**The system reported success, and the report was true but irrelevant.**
+
+The backup job succeeded — with zero volumes. The pod was `Ready` — and served errors. The
+application was `Healthy` — at zero replicas. CI was green — and nothing pulled the image. The
+scanner had reports — for the wrong images. The certificate substitution worked — and wrote a
+placeholder.
+
+None of these are bugs in the software. Each is a **gap between the thing being measured and the
+thing you care about**, and it is the default condition rather than an unusual one. The work of
+making a cluster trustworthy is largely the work of closing those gaps deliberately, one at a
+time, usually after being burned once.
+
+The corollary, and the reason this file exists: **when a system tells you everything is fine,
+the useful question is not "is it lying" but "what exactly is it claiming".**

@@ -19,3 +19,8 @@ home\.arpa
 
 # This repo's own gitignored denylist filename ends in .local and is not a hostname.
 anonymize-denylist\.local
+
+# svc.cluster.local is the Kubernetes-internal DNS suffix — a fixed constant of the
+# platform, identical on every cluster, and unavoidable when documenting DNS behaviour.
+# Matches the service-FQDN form only; a bare hostname ending .local still trips.
+[a-z0-9.-]*\bsvc\.cluster\.local
