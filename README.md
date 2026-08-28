@@ -44,7 +44,7 @@ Once that exists, running an application is a small, boring act. That is the poi
   cluster. It is a path you walk, with the reasoning kept in.
 - **Not somebody's dotfiles.** Every value you must supply is an obvious placeholder
   (see [Placeholders](#placeholders)). No hostname, address, or password from the original
-  cluster appears anywhere — enforced by CI, not by good intentions.
+  cluster appears anywhere — checked mechanically, not left to good intentions.
 
 ## Who it is for
 
@@ -73,7 +73,7 @@ requirement**. The original build:
 | **Nodes** | 5 machines — a mix of old laptops and outdated desktops |
 | **RAM** | from ~3.7 GB to 16 GB per node. The small ones are real nodes, not decoration |
 | **Storage** | consumer USB disks, replicated |
-| **Network** | ordinary consumer gigabit, with some nodes on wifi |
+| **Network** | a consumer switch and home wifi — some nodes are wireless. No datacenter networking anywhere |
 | **Cost** | hardware that was otherwise going to be discarded |
 
 If your machines are better than this, everything here still applies and will hurt less.
@@ -84,9 +84,13 @@ Every value you must supply looks like this: `<NODE_A>`, `<CLUSTER_DOMAIN>`, `<A
 `<LAN_SUBNET>`. They are deliberately loud. If you find something that looks like a real
 hostname, address, or credential anywhere in this repo, **that is a bug** — please open an issue.
 
-A CI job ([`scripts/check-anonymized.sh`](scripts/check-anonymized.sh)) fails the build on
-private IPs, email addresses, key material, tokens, and internal hostnames. It is reusable if
-you are publishing infrastructure docs of your own.
+[`scripts/check-anonymized.sh`](scripts/check-anonymized.sh) enforces this in two layers. The
+generic patterns — private IPs, email addresses, key material, tokens, internal hostnames — live
+in the repo and run in CI on every push. The author's own hostnames and passwords live in a
+**gitignored** local denylist and are checked before pushing, because a committed list of real
+values would itself be the leak it exists to prevent.
+
+The script is reusable if you are publishing infrastructure docs of your own.
 
 ## Findings
 
@@ -98,8 +102,27 @@ road is closed is worth as much as knowing which one is open.
 
 See [`findings/`](findings/).
 
-## License
+## Licence
 
-**Not yet set.** Intended: permissive for the scripts and manifests, attribution-required for
-the writing. Until a `LICENSE` file lands, no license is granted — treat it as all rights
-reserved and check back rather than assuming.
+| | |
+|---|---|
+| All prose — `README.md`, `AGENTS.md`, `docs/`, `findings/` | [CC-BY-4.0](LICENSE-docs) |
+| All code — `scripts/`, manifests, CI | [Apache-2.0](LICENSE) |
+
+Both permissive. **This was done for free and is given away for free** — build on it, adapt it,
+run a business on it, keep your result closed. That is the intent, not a loophole. The whole
+point of publishing is that someone else does not have to spend the months we spent.
+
+Attribution is asked for the writing only, and only because a finding should carry a record of
+where it came from — a technique is easy to copy and hard to re-derive, and the next person
+deserves to know who paid for it the first time.
+
+## Who
+
+**Ross ([@rossduprey](https://github.com/rossduprey))** — the hardware, the direction, and the
+judgement calls: what is load-bearing, what is decoration, and the standing insistence that
+this repo be nobody's cluster but the reader's.
+
+**Claude (Opus 5)** — the recall, the extraction, and most of the typing, plus a running supply
+of confident mistakes. The ones that mattered are written into `findings/` rather than quietly
+removed, because a corrected error is more useful to you than a clean-looking document.
