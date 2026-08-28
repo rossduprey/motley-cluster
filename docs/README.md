@@ -5,7 +5,7 @@ Read in order. Each layer assumes the one above it is working and verified; see
 
 | Section | Covers | Status |
 |---|---|---|
-| `00-premise/` | what you are building, what it costs, what you need first | not yet written |
+| `00-premise/` | what you are building, what it costs, what you need first | **written** — start here |
 | `01-nodes/` | OS, k3s install, joining machines, node configuration | not yet written |
 | `02-network/` | DNS, ingress, internal certificate authority, TLS | not yet written |
 | `03-storage/` | replicated block storage on consumer disks, backups | not yet written |
