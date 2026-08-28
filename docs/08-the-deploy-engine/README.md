@@ -15,9 +15,9 @@ this is the engine.
 **Prerequisite:** `07-observability/` is complete and gated. Build this last. An engine that
 deploys services faster than you can tell whether they work is a machine for generating unknowns.
 
-> **This section ships as source.** The design is here; a working reference implementation lands
-> in `reference-engine/` alongside it, Apache-2.0, written against this repo's placeholders. Take
-> it, rewrite it, or read it and write your own — all three are fine.
+> **This section ships as source.** The design is here; the working implementation is in
+> [`reference-engine/`](reference-engine/) — Apache-2.0, 53 tests, no cluster required to run
+> them. Take it, rewrite it, or read it and write your own; all three are fine.
 
 ---
 

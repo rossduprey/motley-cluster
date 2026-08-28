@@ -2,3 +2,11 @@
 # cluster these docs were adapted from. A committed denylist of real values IS the leak
 # it exists to prevent. Keep it local, always.
 .anonymize-denylist.local
+
+# Python bytecode from running the reference engine's test suite.
+__pycache__/
+*.pyc
+
+# A local settings file for the reference engine would hold real repository URLs
+# and a real domain. The example is committed; your filled-in copy is not.
+engine.yaml

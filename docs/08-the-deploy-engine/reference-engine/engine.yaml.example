@@ -1,0 +1,45 @@
+# engine.yaml.example — everything the engine needs to know.
+#
+# Note what is NOT here: no kubeconfig, no API server address, no service
+# account, no cluster credentials of any kind. The engine writes to git and
+# stops. If you find yourself wanting to add a cluster credential to this file,
+# read README.md section 6 first — that is exactly how we broke every service
+# this engine ever deployed.
+
+# The repository holding the catalog, the templates, and the CA certificate.
+# Read-only access is enough.
+source_url: "https://git.<CLUSTER_DOMAIN>/<ORG>/infrastructure.git"
+
+# The repository your GitOps controller watches. The engine needs write access
+# to this one and to nothing else.
+gitops_url: "https://git.<CLUSTER_DOMAIN>/<ORG>/gitops.git"
+
+# Where working copies are kept. A cache — safe to delete, never edited by hand.
+workdir: "/var/lib/deploy-engine"
+
+# The internal DNS suffix every service is reachable at.
+cluster_domain: "<CLUSTER_DOMAIN>"
+
+# Paths inside source_url.
+catalog_path: "catalog.yaml"
+templates_dir: "templates"
+ca_cert_path: "ca/internal-ca.crt"
+
+# The URL Argo CD itself uses to reach the GitOps repo, if it differs from the
+# one the engine uses — typically an in-cluster service address. Leave empty to
+# use gitops_url for both.
+gitops_repo_url_for_argocd: ""
+
+# The node label a catalog entry's `nodeClass` maps to. A CLASS, not a hostname.
+node_class_label: "node-class"
+
+# Who the commits are attributed to. Give the engine its own identity so a
+# person's name never appears on a machine-written commit.
+author: "deploy-engine <deploy-engine@<CLUSTER_DOMAIN>>"
+
+branch: "main"
+
+# Baked-in template copies, used ONLY when the source repository is unreachable.
+# Keep them: the alternative is an engine that cannot deploy during a git
+# outage, which is when you are most likely to need it.
+fallback_templates: "/app/templates"

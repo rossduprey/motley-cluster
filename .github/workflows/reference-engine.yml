@@ -1,0 +1,38 @@
+name: reference-engine
+
+# The deploy engine in docs/08 ships as working source, so it gets a working
+# test suite and CI runs it. A reference implementation nobody executes is a
+# very long code sample.
+#
+# The tests need git, PyYAML, and nothing else — no cluster, no network. That
+# is a property of the engine rather than of the tests: it writes to git and
+# touches nothing else.
+
+on:
+  push:
+    branches: [main]
+    paths: ["docs/08-the-deploy-engine/reference-engine/**", ".github/workflows/reference-engine.yml"]
+  pull_request:
+    paths: ["docs/08-the-deploy-engine/reference-engine/**", ".github/workflows/reference-engine.yml"]
+  workflow_dispatch:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: docs/08-the-deploy-engine/reference-engine
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check pyyaml
+      - name: Configure git for the test fixtures
+        run: |
+          git config --global init.defaultBranch main
+          git config --global user.name "ci"
+          git config --global user.email "ci@example.com"
+      - name: Run the test suite
+        run: python -m unittest discover -s tests -t tests -v

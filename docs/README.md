@@ -13,7 +13,7 @@ Read in order. Each layer assumes the one above it is working and verified; see
 | `05-gitops/` | continuous reconciliation from a repo; encrypted secrets | **written** |
 | `06-deploying-services/` | generic manifest templates; deploying your own workloads | **written** — includes `service-template.yaml.example` |
 | `07-observability/` | metrics, logs, alerts, and probing from outside | **written** — the last platform layer |
-| `08-the-deploy-engine/` | the capstone: making deployment a matter of naming a service | **design written** — includes `catalog.yaml.example`; reference implementation next |
+| `08-the-deploy-engine/` | the capstone: making deployment a matter of naming a service | **written** — the design, plus `reference-engine/`, a working Apache-2.0 implementation |
 
 **"Not yet written" means exactly that.** These sections are being extracted from a cluster
 that has been running for months, in the order above. Nothing is stubbed to look finished.

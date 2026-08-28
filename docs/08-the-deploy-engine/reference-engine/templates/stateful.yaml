@@ -1,0 +1,151 @@
+# stateful — one volume, no database. The template most services use.
+#
+# Tokens: APP_NAME, APP_NAMESPACE, APP_TITLE, APP_DOMAIN, APP_IMAGE, APP_PORT,
+#         WAVE_NUMBER, CA_CERT
+#
+# Note that this header names every token, including the multi-line CA_CERT,
+# and that this is safe. The engine parses the template as YAML and substitutes
+# into the resulting values, so comments are gone before any substitution
+# happens. Under a string-replacing engine this header would break the file.
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: APP_NAME
+  labels:
+    app.kubernetes.io/name: APP_NAME
+
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: defaults
+  namespace: APP_NAMESPACE
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: "500m"
+        memory: "512Mi"
+      defaultRequest:
+        cpu: "50m"
+        memory: "128Mi"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: internal-ca
+  namespace: APP_NAMESPACE
+data:
+  internal-ca.crt: CA_CERT
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: APP_NAME-data
+  namespace: APP_NAMESPACE
+  labels:
+    backup-schedule: daily
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: replicated
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: APP_NAME
+  namespace: APP_NAMESPACE
+  labels:
+    app: APP_NAME
+    app.kubernetes.io/description: APP_TITLE
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: APP_NAME
+  template:
+    metadata:
+      labels:
+        app: APP_NAME
+    spec:
+      containers:
+        - name: APP_NAME
+          image: APP_IMAGE
+          ports:
+            - containerPort: APP_PORT
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: internal-ca
+              mountPath: /usr/local/share/ca-certificates/internal-ca.crt
+              subPath: internal-ca.crt
+              readOnly: true
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: APP_NAME-data
+        - name: internal-ca
+          configMap:
+            name: internal-ca
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: APP_NAME
+  namespace: APP_NAMESPACE
+spec:
+  selector:
+    app: APP_NAME
+  ports:
+    - port: 80
+      targetPort: APP_PORT
+
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: APP_NAME-tls
+  namespace: APP_NAMESPACE
+spec:
+  secretName: APP_NAME-tls
+  dnsNames:
+    - APP_DOMAIN
+  issuerRef:
+    name: internal-ca-issuer
+    kind: ClusterIssuer
+
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: APP_NAME
+  namespace: APP_NAMESPACE
+  annotations:
+    argocd.argoproj.io/sync-wave: "WAVE_NUMBER"
+spec:
+  entryPoints: ["websecure"]
+  routes:
+    - match: Host(`APP_DOMAIN`)
+      kind: Rule
+      services:
+        - name: APP_NAME
+          port: 80
+  tls:
+    secretName: APP_NAME-tls
