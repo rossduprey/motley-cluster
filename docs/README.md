@@ -7,7 +7,7 @@ Read in order. Each layer assumes the one above it is working and verified; see
 |---|---|---|
 | `00-premise/` | what you are building, what it costs, what you need first | **written** — start here |
 | `01-nodes/` | OS, k3s install, joining machines, node configuration | **written** — includes `prepare-node.sh` |
-| `02-network/` | DNS, ingress, internal certificate authority, TLS | not yet written |
+| `02-network/` | DNS, ingress, internal certificate authority, TLS | **written** — includes `install-ca-trust.sh` |
 | `03-storage/` | replicated block storage on consumer disks, backups | not yet written |
 | `04-git-ci-registry/` | git, CI runners, and a container registry in-cluster | not yet written |
 | `05-gitops/` | continuous reconciliation from a repo; encrypted secrets | not yet written |
