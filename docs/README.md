@@ -11,7 +11,7 @@ Read in order. Each layer assumes the one above it is working and verified; see
 | `03-storage/` | replicated block storage on consumer disks, backups | **written** |
 | `04-git-ci-registry/` | git, CI runners, and a container registry in-cluster | **written** — includes `registries.yaml.example` |
 | `05-gitops/` | continuous reconciliation from a repo; encrypted secrets | **written** |
-| `06-deploying-services/` | generic manifest templates; deploying your own workloads | not yet written |
+| `06-deploying-services/` | generic manifest templates; deploying your own workloads | **written** — includes `service-template.yaml.example` |
 | `07-observability/` | metrics, dashboards, log aggregation | not yet written |
 
 **"Not yet written" means exactly that.** These sections are being extracted from a cluster

@@ -1,0 +1,197 @@
+# service-template.yaml.example — the "stateful" shape.
+#
+# One volume, no database. This is the template most services use.
+#
+# Substitute the ${...} values however you like — envsubst, a Helm chart with a
+# values file, a Kustomize overlay, or twelve lines of Python. The machinery
+# matters far less than the fact that every service gets all of these objects.
+#
+#   ${APP_NAME}       service name; also the namespace and the hostname
+#   ${APP_IMAGE}      image reference, ideally through your registry's cache
+#   ${APP_PORT}       container port
+#   ${STORAGE_SIZE}   e.g. 10Gi
+#   ${CLUSTER_DOMAIN} your internal domain
+#
+# ⚠️ Do NOT write a token name inside a comment if your substitution is naive
+# string replacement — it gets replaced there too, and a multi-line value turns
+# the comment into invalid YAML. See README.md section 4.
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${APP_NAME}
+
+---
+# Requests and limits every workload in this namespace inherits if it forgets to
+# ask. A cluster of unequal machines schedules by luck without these.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: defaults
+  namespace: ${APP_NAME}
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: "500m"
+        memory: "512Mi"
+      defaultRequest:
+        cpu: "50m"
+        memory: "128Mi"
+
+---
+# The internal CA root, so this pod can call other internal HTTPS endpoints.
+# Populate it from your CA — and VERIFY the contents, not just the mount:
+# a placeholder string here looks exactly like a working configuration.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: internal-ca
+  namespace: ${APP_NAME}
+data:
+  internal-ca.crt: |
+    PLACEHOLDER_REPLACE_WITH_CA_PEM
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ${APP_NAME}-data
+  namespace: ${APP_NAME}
+  labels:
+    # Backup enrolment, in the same change that creates the volume.
+    # Check whether your storage layer reads this from the PVC or from its own
+    # volume resource — if it is the latter, this label is decoration.
+    backup-schedule: daily
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: replicated
+  resources:
+    requests:
+      storage: ${STORAGE_SIZE}
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${APP_NAME}
+  namespace: ${APP_NAME}
+spec:
+  replicas: 1
+  # A read-write-once volume cannot be held by old and new pods at once.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: ${APP_NAME}
+  template:
+    metadata:
+      labels:
+        app: ${APP_NAME}
+    spec:
+      containers:
+        - name: ${APP_NAME}
+          image: ${APP_IMAGE}
+          ports:
+            - containerPort: ${APP_PORT}
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: internal-ca
+              mountPath: /usr/local/share/ca-certificates/internal-ca.crt
+              subPath: internal-ca.crt
+              readOnly: true
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: ${APP_NAME}-data
+        - name: internal-ca
+          configMap:
+            name: internal-ca
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${APP_NAME}
+  namespace: ${APP_NAME}
+spec:
+  selector:
+    app: ${APP_NAME}
+  ports:
+    - port: 80
+      targetPort: ${APP_PORT}
+
+---
+# Issued automatically, renewed automatically, by the one issuer from 02-network.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: ${APP_NAME}-tls
+  namespace: ${APP_NAME}
+spec:
+  secretName: ${APP_NAME}-tls
+  dnsNames:
+    - ${APP_NAME}.${CLUSTER_DOMAIN}
+  issuerRef:
+    name: internal-ca-issuer
+    kind: ClusterIssuer
+
+---
+# Traefik's route type. An Ingress or a Gateway API HTTPRoute does the same job.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: ${APP_NAME}
+  namespace: ${APP_NAME}
+spec:
+  entryPoints: ["websecure"]
+  routes:
+    - match: Host(`${APP_NAME}.${CLUSTER_DOMAIN}`)
+      kind: Rule
+      services:
+        - name: ${APP_NAME}
+          port: 80
+  tls:
+    secretName: ${APP_NAME}-tls
+
+---
+# Only needed if this namespace denies ingress by default — but if you ever add
+# such a policy, BOTH rules below must exist. The second one is the certificate
+# challenge, and omitting it means the certificate silently never issues.
+#
+# apiVersion: networking.k8s.io/v1
+# kind: NetworkPolicy
+# metadata:
+#   name: allow-app-http
+#   namespace: ${APP_NAME}
+# spec:
+#   podSelector:
+#     matchLabels:
+#       app: ${APP_NAME}
+#   policyTypes: ["Ingress"]
+#   ingress:
+#     - ports:
+#         - port: ${APP_PORT}
+# ---
+# apiVersion: networking.k8s.io/v1
+# kind: NetworkPolicy
+# metadata:
+#   name: allow-acme-solver
+#   namespace: ${APP_NAME}
+# spec:
+#   podSelector:
+#     matchLabels:
+#       acme.cert-manager.io/http01-solver: "true"
+#   policyTypes: ["Ingress"]
+#   ingress:
+#     - ports:
+#         - port: 8089
