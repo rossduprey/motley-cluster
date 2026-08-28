@@ -1,0 +1,4 @@
+# The local denylist holds real hostnames, domains, usernames and passwords from the
+# cluster these docs were adapted from. A committed denylist of real values IS the leak
+# it exists to prevent. Keep it local, always.
+.anonymize-denylist.local

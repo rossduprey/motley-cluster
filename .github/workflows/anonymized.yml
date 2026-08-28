@@ -1,0 +1,24 @@
+name: anonymized
+
+# The whole repo is a template. This job is the guard that keeps it one: it fails the
+# build if any value that looks real — a private IP, an email, key material, an internal
+# hostname — makes it into a tracked file.
+#
+# Note for contributors: the author's own identifying strings live in a gitignored
+# .anonymize-denylist.local, so CI runs the generic patterns only. That is intentional —
+# a committed denylist of real values would itself be the leak. Run the script locally
+# with your own denylist before pushing.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for identifying or secret values
+        run: ./scripts/check-anonymized.sh
