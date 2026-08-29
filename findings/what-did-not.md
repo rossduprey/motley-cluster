@@ -387,23 +387,27 @@ more than either one does.
 
 ### A whole parallel environment, built so the real one could be left alone
 
-**What we did.** Stood up a complete second environment beside the live one so platform changes
-could be developed without touching anything anyone used: its own DNS suffix, its own directory
-tree of manifests, its own deploy engine, even its own colour scheme so a screenshot could not be
+**What we did.** Stood up a complete second environment beside the live one, mostly out of
+curiosity about whether it was a good idea: its own DNS suffix, its own directory tree of
+manifests, its own deploy engine, even its own colour scheme so a screenshot could not be
 mistaken for the real thing.
 
-**What happened.** It was abandoned and removed entirely. The record of *why* it ended is thin —
-"dead end" is all it says — so the honest finding here is not the reason but **the removal
-bill**, which was itemised: a second deploy engine and its namespace, the entire parallel
-manifest tree, and every DNS record for the parallel suffix, one at a time. One service had to be
-moved back to a name on the real suffix afterwards, because at some point it had quietly become
-the only place that service was reachable.
+**What happened.** It was abandoned and removed entirely, for the plainest possible reason —
+**it was double the trouble.** Every platform change now had two places to land, two things to
+verify, and two ways to be half-done. Nothing dramatic failed; the experiment simply cost twice
+as much per change as it saved, continuously, and the honest answer was to stop.
 
-**Why this is worth your attention anyway.** The parallel environment is the appealing idea in
-this whole file. It sounds like caution. What it actually buys is **two of everything to
-maintain, and a testing surface that is not the thing you run** — and the tell is that last
-detail: a production service had migrated into the "experimental" environment without anybody
-deciding to move it. Once two environments exist, work flows to whichever is convenient.
+**What it cost to unwind**, which is the part worth knowing before you start one: a second deploy
+engine and its namespace, the entire parallel manifest tree, and every DNS record for the
+parallel suffix, one at a time. One service had to be moved back to a name on the real suffix
+afterwards, because at some point it had quietly become the only place that service was
+reachable.
+
+**Why this is the appealing idea in this whole file.** A parallel environment sounds like
+caution. What it actually buys is **two of everything to maintain, and a testing surface that is
+not the thing you run** — and the tell is that last detail: a production service had migrated
+into the "experimental" environment without anybody deciding to move it. Once two environments
+exist, work flows to whichever is convenient, and the boundary you built stops meaning anything.
 
 **Instead:** isolate with namespaces, not with parallel worlds. If you need somewhere to break
 things, deploy a real service you are willing to delete, in the real cluster, on the real domain
