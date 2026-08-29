@@ -385,6 +385,99 @@ could each claim to own a service, shared-namespace drift that showed up as perm
 **Instead:** migrate, don't duplicate. Two systems that both partially own the same thing cost
 more than either one does.
 
+### A whole parallel environment, built so the real one could be left alone
+
+**What we did.** Stood up a complete second environment beside the live one so platform changes
+could be developed without touching anything anyone used: its own DNS suffix, its own directory
+tree of manifests, its own deploy engine, even its own colour scheme so a screenshot could not be
+mistaken for the real thing.
+
+**What happened.** It was abandoned and removed entirely. The record of *why* it ended is thin —
+"dead end" is all it says — so the honest finding here is not the reason but **the removal
+bill**, which was itemised: a second deploy engine and its namespace, the entire parallel
+manifest tree, and every DNS record for the parallel suffix, one at a time. One service had to be
+moved back to a name on the real suffix afterwards, because at some point it had quietly become
+the only place that service was reachable.
+
+**Why this is worth your attention anyway.** The parallel environment is the appealing idea in
+this whole file. It sounds like caution. What it actually buys is **two of everything to
+maintain, and a testing surface that is not the thing you run** — and the tell is that last
+detail: a production service had migrated into the "experimental" environment without anybody
+deciding to move it. Once two environments exist, work flows to whichever is convenient.
+
+**Instead:** isolate with namespaces, not with parallel worlds. If you need somewhere to break
+things, deploy a real service you are willing to delete, in the real cluster, on the real domain
+— then delete it. That exercises the paths you actually use, which a parallel copy never does.
+
+---
+
+## Git, CI and the registry
+
+### Every build went red ten minutes after succeeding
+
+**What we did.** Upgraded the self-hosted git server by a point release, the way you upgrade
+anything.
+
+**What happened.** Builds succeeded, pushed their images, rolled their deployments — and were
+then marked **failed** ten to fifteen minutes later. The job logs ended in `Job succeeded`. The
+pods were running the new image. The run said failure.
+
+**The signature that identified it, and this is the transferable part:** every failure timestamp
+landed on **the same second-offset, on a fixed multiple of five minutes.** Nothing that depends
+on how long a build takes fails at a regular interval. A clock does. That pattern alone says
+*a periodic sweeper marked this, a build did not* — before you know anything about the cause.
+
+**Why.** The runner reports job completion over an API the server had regressed: the server
+rejected a **re-sent** end-of-log message instead of acknowledging it idempotently, returning a
+`500`. In the runner, flushing logs gated reporting the final state — so the state report was
+never reached, and the runner **logged nothing about it at any level**. The task row stayed
+`running` forever, and the server's zombie-task reaper, on its five-minute cycle, eventually
+marked it failed. Short jobs escaped, because they never triggered the re-send — which is why it
+looked intermittent.
+
+**Instead:**
+
+- **When runs fail on a schedule rather than on a duration, look for a sweeper, not a build.**
+- **A runner that goes quiet after "job succeeded" is not evidence that it reported anything.**
+  Silence in a client log is compatible with a failed retry loop. Check the *server's* access log
+  for the calls it should have received.
+- Pin your git server's version and read its changelog before upgrading. This class of break
+  lives in the API between server and runner, which is exactly the surface no release note calls
+  out and no smoke test covers.
+- **Ground truth is the running pod's image digest** — this failure changed nothing about what
+  was deployed, only about what the dashboard claimed.
+
+**And the tooling lesson, which cost more than the bug:** our own status tooling omitted
+in-progress runs entirely, so during an incident it showed *no* run for a commit that was
+actively building, next to three stale red ones. A monitoring surface that hides the current
+state while showing old failures is worse than none.
+
+### Pushing large images to a registry on the same machine that hosts it
+
+**What we did.** Built container images on a node and pushed them to the registry running in the
+cluster, reached by its public name.
+
+**What happened.** Pushes of large images — ours started failing somewhere in the hundreds of
+megabytes; we never established the exact threshold — died with a connection reset. Small images
+were fine, which made it look like a flaky network rather than a repeatable limit.
+
+**Why.** The traffic left the machine, went out to the router, and came back to the same machine
+— a hairpin — and something in that path did not survive a long single connection. **We never
+found out what.** That is the honest state of this entry: we worked around it and moved on.
+
+**Instead**, in the order we would try them now:
+
+1. **Stop building enormous images.** Ours was large because it baked in content that could be
+   fetched at runtime instead. Pulling that content at startup removed the problem *and* made
+   the image faster to deploy. The workaround was better than the fix would have been.
+2. Push to the registry's in-cluster address from a machine inside the cluster, so the traffic
+   never leaves it.
+3. Only then go looking at the router.
+
+**The general point:** a size-dependent failure between two things on the same machine is
+almost always a path problem, not a capacity problem, and the cheapest fix is usually to stop
+sending the data rather than to make the path work.
+
 ---
 
 ## Permissions
@@ -416,6 +509,48 @@ do. It is not evidence. A `403` from the actual endpoint is evidence.
 
 ---
 
+## Documentation
+
+### The notes directory that lost most of itself, and nobody could tell
+
+**What we did.** Kept the working notes for this cluster — build histories, session notes, design
+rationale — in an ordinary directory of markdown files. Not in git. It had an index page listing
+everything in it. It was cited, by name, as an authoritative source in the standing instructions
+we gave our own tooling, **ranked above the version-controlled knowledge base.**
+
+**What happened.** When we finally audited it, the index advertised **78 markdown files. Four
+still existed.** The other seventy-odd had been deleted at some point by something, and the index
+went on listing them — so every reference was a link to a file that had been gone for months,
+looking exactly like a link to a file that was there.
+
+**What it cost, concretely.** A question came up that should have been cheap: *why is the media
+stack configured this way?* The document that answered it was one of the deleted ones. There was
+no history, no previous revision, no backup — an unversioned file that is deleted is simply gone.
+A session was spent reconstructing the reasoning from what survived, and the reconstruction is
+strictly worse than the original.
+
+**The second failure, which is subtler and worse.** A small piece of software also lived only in
+that directory. When it was finally put into a repository, its code had drifted far past the
+design document beside it: it had acquired two permissions and two whole features the document
+never mentions, and one file was roughly twenty times the length its plan sketched. **Nobody had
+done anything wrong** — there was simply no diff, ever, so documentation and reality separated
+silently over months.
+
+**Instead:**
+
+- **If it is worth writing down, it goes in git.** Not for collaboration — for *history*. The
+  value is being able to answer "what did this say before" and "when did this change", and an
+  unversioned file cannot answer either.
+- **An index is not an inventory.** A list of links to files that may or may not exist reports
+  the same way whether the files are there or not. If you keep one, generate it from what is
+  actually present.
+- **Do not cite an unversioned location as a source of truth**, least of all in the instructions
+  you hand an agent. It will read what is there, find nothing contradicting it, and be confident.
+- **Unversioned code does not merely risk deletion — it stops matching its own documentation**,
+  and there is no mechanism by which anyone finds out.
+
+---
+
 ## The pattern underneath most of these
 
 Reading them together, one shape recurs far more than any technical cause:
@@ -434,3 +569,9 @@ time, usually after being burned once.
 
 The corollary, and the reason this file exists: **when a system tells you everything is fine,
 the useful question is not "is it lying" but "what exactly is it claiming".**
+
+The mirror image is rarer and just as expensive: **a system reporting failure that is equally
+true and equally irrelevant.** Every build going red ten minutes after deploying correctly is
+the same gap seen from the other side — the run status was an accurate statement about a
+database row, and a worthless statement about whether the software was running. Ask the same
+question of a red light that you ask of a green one.
