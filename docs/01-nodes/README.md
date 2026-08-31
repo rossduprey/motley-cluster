@@ -49,6 +49,36 @@ Two things to get right at install time, because they are annoying afterwards:
 
 If a machine can only run a 32-bit OS, it is not a node. That is the one hard hardware floor.
 
+### If you choose an immutable, transactional distribution
+
+Reducing what can drift on a node is a reasonable answer to the entropy this whole repo is
+written against, and openSUSE MicroOS, Fedora CoreOS and Talos all offer it. **Stated plainly:
+this repo has not run one of these long enough to recommend it** — the guidance below is what
+changes mechanically, not a claim that it holds up.
+
+The root filesystem is read-only and changes are applied as a new snapshot that takes effect on
+reboot (`transactional-update pkg install …` on MicroOS). Three consequences:
+
+- **[`prepare-node.sh`](prepare-node.sh) does not apply as written.** It is `apt`-flavoured and it
+  assumes a writable root. The *steps* still all matter — swap off, iSCSI present, hostname set,
+  lid ignored, key installed — but each one has a different mechanism, and several are install-time
+  answers rather than post-install commands.
+- **Every package is a reboot.** This inverts the usual advice to install the minimum and add
+  things later: on these systems, "later" is a scheduled outage, so decide at install time.
+- **Get the install-time questions right**, because they are the expensive ones to revisit:
+  addressing, DNS, NTP, and hostname. See `00-premise/prerequisites.md` items 4 and 7.
+
+**Do not take the "container host" install variant.** These distributions typically offer a role
+that preinstalls Podman. k3s ships and manages its own containerd, and nothing in this repo uses
+Podman — so that role buys you a second container runtime with its own storage layer, its own
+networking, and its own thing to reconcile on every update. Take the plain variant. Podman is one
+`transactional-update pkg install` away if you ever genuinely want it for standalone containers.
+
+**One thing to check before you commit to this on a node**, because the k3s install script writes
+a binary and a systemd unit to the host: confirm the installer's target paths are on writable
+subvolumes on your chosen distribution — on MicroOS, `/usr/local` and `/var` are the writable ones
+and `/usr` is not. Verify it on the first node rather than discovering it on the fifth.
+
 ## 2. Prepare every machine identically
 
 [`prepare-node.sh`](prepare-node.sh) does everything in this section. Read it before running it —
@@ -75,8 +105,12 @@ What it does and why each step is there:
   [`findings/what-did-not.md`](../../findings/what-did-not.md), and it presents as a single
   application crash-looping on a single node.
 - **Make the DHCP client identify by MAC**, not by a generated DUID, or the router's reservation
-  will not apply and the node comes up on an address nobody expected.
-- **NTP running**, clocks agreeing. Certificates and tokens fail in ways that name neither.
+  will not apply and the node comes up on an address nobody expected. **The control plane does not
+  use a reservation at all** — it gets a static address on the machine, for the reasons in
+  `00-premise/prerequisites.md` item 4.
+- **NTP running, and pointed at a server you control**, clocks agreeing. "NTP is on" is not the
+  requirement; agreeing with a known source is. Certificates and tokens fail in ways that name
+  neither.
 
 **Verify before moving on**, on each machine:
 
@@ -85,7 +119,15 @@ cat /etc/resolv.conf      # every node should say the same kind of thing
 free -h                   # swap total: 0
 systemctl is-active iscsid
 timedatectl               # synchronized: yes
+timedatectl show-timesync # ServerAddress: the machine you chose, not a public pool
+ip route                  # a default route exists — see below
 ```
+
+**Check the default route explicitly.** Some installers collect an address and netmask on one
+screen and the gateway somewhere else, or not at all, and a node with an address but no default
+route passes every "is it on the network" test you are likely to run — it answers pings from its
+own subnet perfectly. It then fails at the first thing that needs to leave the subnet, which is
+usually the k3s install script fetching itself.
 
 ## 3. Install the control plane
 

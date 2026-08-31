@@ -173,6 +173,47 @@ dhcpcd defaults to `duid` identification and the router was matching on MAC. The
 a different address than the one reserved for it. Setting `clientid` in `dhcpcd.conf` fixed it.
 A node that changes address mid-cluster is its own afternoon.
 
+### DNS was enforced with a firewall rule; NTP was left to configuration, and drifted for months
+
+**What we did.** Ran a filtering resolver on the router for the whole household, and — correctly —
+did not trust every device to point at it. A redirect rule on the router caught anything sent to
+port 53 and forced it into the resolver regardless of what the client had configured. That control
+worked, and it worked for long enough that we stopped thinking about it.
+
+Time was handled the other way. Nodes were left with whatever their distribution shipped, which is
+a public NTP pool.
+
+**What happened.** Nothing, visibly, which is the finding. Every node in the cluster spent months
+synchronising its clock against an internet pool, directly, while we believed the network's egress
+was controlled — because the one control we *had* built was real, and its existence was doing the
+reassuring. It surfaced only when a second network segment was built beside the first and the same
+question was asked from scratch: `timedatectl show-timesync` on a node named a public pool address,
+and `netstat -lnup` on the router showed nothing listening on 123 at all. There had never been a
+local time source to point at.
+
+**Why it is worth its own entry.** The two protocols are not different in importance — certificate
+validity, token expiry and lease-based leader election all sit on the clock — they were different
+only in that one had a rule and the other had an intention. A control that exists for one protocol
+creates a *category* impression: "our egress is handled." Nobody audits the members of a category
+they believe is handled.
+
+**What to do instead.**
+
+- **Serve time locally, from the gateway or another machine you control**, and point nodes at it.
+  A policy with no local destination is not a policy; it is a preference that loses to the default.
+- **Enforce it the same way you enforced DNS** — reject outbound 123 from the segment, so a node
+  that is reconfigured fails visibly rather than drifting onto someone else's clock. Match the
+  enforcement to the *policy*, not to the protocol you happened to think about first.
+- **When you build a control, write down what it does not cover.** The redirect rule covered DNS.
+  Nothing recorded that it covered only DNS, so it read as "egress is controlled".
+- **Check parity whenever you add a segment.** A rule scoped to one zone silently does not apply
+  to the next one you create. This is how the gap was found, and it is worth doing deliberately
+  rather than by luck: list the rules on the old segment, and confirm each has a counterpart.
+
+**Stated honestly, as a limit:** none of this touches DNS-over-HTTPS, which rides 443 and is not
+separable from ordinary web traffic by port. Blocklists of known DoH endpoints are mitigation, not
+enforcement. Port-based rules are worth having and are not the same as control.
+
 ---
 
 ## Certificates
