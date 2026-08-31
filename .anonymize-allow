@@ -17,6 +17,10 @@ home\.arpa
 # The placeholder convention itself must never trip a pattern.
 <[A-Z0-9_]+>
 
+# systemd templated unit instances are written unit@instance.service, which is the
+# same shape as an email address. These are fixed upstream unit names, not addresses.
+[a-z0-9-]+@[a-z0-9-]+\.(service|socket|timer|mount|swap|target|path|slice)
+
 # This repo's own gitignored denylist filename ends in .local and is not a hostname.
 anonymize-denylist\.local
 

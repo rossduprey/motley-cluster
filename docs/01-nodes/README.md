@@ -36,9 +36,10 @@ how you end up debugging five broken nodes at once instead of one.
 ## 1. The operating system
 
 **A minimal, current, 64-bit Linux with no desktop environment.** This repo was built on a
-Debian-family distribution and the commands below are `apt`-flavoured; nothing about the design
-depends on that choice, but *making the same choice on every machine* matters more than which
-choice you make.
+Debian-family distribution and the commands in this document are `apt`-flavoured
+([`prepare-node.sh`](prepare-node.sh) itself dispatches on `apt`, `dnf`, `zypper` or
+`transactional-update`); nothing about the design depends on that choice, but *making the same
+choice on every machine* matters more than which choice you make.
 
 Two things to get right at install time, because they are annoying afterwards:
 
@@ -59,10 +60,12 @@ changes mechanically, not a claim that it holds up.
 The root filesystem is read-only and changes are applied as a new snapshot that takes effect on
 reboot (`transactional-update pkg install …` on MicroOS). Three consequences:
 
-- **[`prepare-node.sh`](prepare-node.sh) does not apply as written.** It is `apt`-flavoured and it
-  assumes a writable root. The *steps* still all matter — swap off, iSCSI present, hostname set,
-  lid ignored, key installed — but each one has a different mechanism, and several are install-time
-  answers rather than post-install commands.
+- **Packages are a reboot, and [`prepare-node.sh`](prepare-node.sh) reflects that.** The script
+  detects `transactional-update` and stages packages into a new snapshot instead of installing
+  them; **nothing it installs exists until the machine reboots**, so `iscsid` will not be active
+  when it finishes and that is expected, not a failure. Re-run it after the reboot — it is
+  idempotent — and confirm `iscsid` then. The install-time questions in item 4 and 7 of
+  `00-premise/prerequisites.md` are still install-time answers; the script does not retrofit them.
 - **Every package is a reboot.** This inverts the usual advice to install the minimum and add
   things later: on these systems, "later" is a scheduled outage, so decide at install time.
 - **Get the install-time questions right**, because they are the expensive ones to revisit:
@@ -94,6 +97,7 @@ What it does and why each step is there:
 | **Set the hostname** | Node names in Kubernetes come from here, and they are not easy to change later. |
 | **Ignore the lid switch** | Half of these machines are laptops. A node that suspends when someone closes it is not a node. |
 | **Install the SSH public key** | So the rest of the build is key-based and scriptable. |
+| **Point the clock at `NTP_SERVER`** | Set this to your gateway before the first run. Left at the placeholder the script skips time configuration and says so, rather than silently leaving the node on a public pool — see `00-premise/prerequisites.md` item 7. |
 
 **Three network settings that are not optional**, each of which caused a real incident:
 
